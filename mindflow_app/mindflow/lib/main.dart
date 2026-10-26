@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 void main() {
   runApp(const MindFlowApp());
@@ -13,7 +15,6 @@ class MindFlowApp extends StatelessWidget {
       title: 'MindFlow',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // Màu chủ đạo calming - xanh mint nhẹ nhàng
         primaryColor: const Color(0xFF7EB5A6),
         scaffoldBackgroundColor: const Color(0xFFF8F9FA),
         colorScheme: ColorScheme.fromSeed(
@@ -28,6 +29,51 @@ class MindFlowApp extends StatelessWidget {
   }
 }
 
+// ============================================
+// API SERVICE - Kết nối với FastAPI Backend
+// ============================================
+class MindFlowApiService {
+  // ⚠️ ĐỊA CHỈ BACKEND - Chọn đúng theo cách bạn chạy Flutter:
+  // Android Emulator: http://10.0.2.2:8000
+  // iOS Simulator: http://localhost:8000
+  // Điện thoại thật: http://192.168.1.XX:8000 (IP máy tính)
+  // Web browser: http://localhost:8000
+  static const String baseUrl = 'http://localhost:8000';
+
+  static Future<String> sendMessage(
+    String userId,
+    String message,
+    List<Map<String, String>> history,
+  ) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/chat'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'user_id': userId,
+          'message': message,
+          'history': history.map((h) => {
+            'role': h['role'] == 'user' ? 'user' : 'assistant',
+            'content': h['text'] ?? h['content'] ?? '',
+          }).toList(),
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['reply'] ?? 'Xin lỗi, mình không hiểu.';
+      } else {
+        return '⚠️ Lỗi kết nối: ${response.statusCode}';
+      }
+    } catch (e) {
+      return '⚠️ Không thể kết nối đến MindFlow Backend.\nĐảm bảo server đang chạy!';
+    }
+  }
+}
+
+// ============================================
+// CHAT SCREEN
+// ============================================
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
 
@@ -42,25 +88,41 @@ class _ChatScreenState extends State<ChatScreen> {
       'text': 'Xin chào! Mình là MindFlow 🧠✨\nHôm nay bạn cảm thấy thế nào?'
     }
   ];
+  
+  final List<Map<String, String>> _history = [];
   final TextEditingController _controller = TextEditingController();
+  bool _isLoading = false;
+  
+  // User ID cố định (sau này có thể dùng UUID hoặc device ID)
+  final String _userId = 'user_001';
 
-  void _sendMessage() {
-    if (_controller.text.trim().isNotEmpty) {
-      setState(() {
-        // Thêm tin nhắn của user
-        _messages.add({
-          'role': 'user',
-          'text': _controller.text.trim()
-        });
-        
-        // Thêm phản hồi mẫu của AI (sau này sẽ kết nối API thật)
-        _messages.add({
-          'role': 'ai',
-          'text': 'Mình nghe đây. Kể thêm cho mình nghe nhé... 💚'
-        });
-      });
-      _controller.clear();
-    }
+  Future<void> _sendMessage() async {
+    if (_controller.text.trim().isEmpty || _isLoading) return;
+
+    final userMessage = _controller.text.trim();
+    
+    setState(() {
+      _messages.add({'role': 'user', 'text': userMessage});
+      _isLoading = true;
+    });
+    
+    _controller.clear();
+
+    // Gọi API thật
+    final aiResponse = await MindFlowApiService.sendMessage(
+      _userId,
+      userMessage,
+      _history,
+    );
+
+    setState(() {
+      _messages.add({'role': 'ai', 'text': aiResponse});
+      _isLoading = false;
+      
+      // Cập nhật lịch sử
+      _history.add({'role': 'user', 'content': userMessage});
+      _history.add({'role': 'assistant', 'content': aiResponse});
+    });
   }
 
   @override
@@ -68,7 +130,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          'MindFlow 🧠',
+          'MindFlow ',
           style: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w600,
@@ -88,7 +150,7 @@ class _ChatScreenState extends State<ChatScreen> {
               itemBuilder: (context, index) {
                 final message = _messages[index];
                 final isUser = message['role'] == 'user';
-                
+
                 return Container(
                   margin: const EdgeInsets.only(bottom: 12),
                   alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -98,13 +160,11 @@ class _ChatScreenState extends State<ChatScreen> {
                       vertical: 12,
                     ),
                     decoration: BoxDecoration(
-                      color: isUser 
-                          ? const Color(0xFF7EB5A6) 
-                          : Colors.white,
+                      color: isUser ? const Color(0xFF7EB5A6) : Colors.white,
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
+                          color: Colors.black.withValues(alpha: 0.05),
                           blurRadius: 10,
                           offset: const Offset(0, 2),
                         ),
@@ -123,7 +183,34 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
-          
+
+          // Loading indicator
+          if (_isLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF7EB5A6)),
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'MindFlow đang suy nghĩ...',
+                    style: TextStyle(
+                      color: Color(0xFF7EB5A6),
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // Khu vực nhập tin nhắn
           Container(
             padding: const EdgeInsets.all(16),
@@ -131,7 +218,7 @@ class _ChatScreenState extends State<ChatScreen> {
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   blurRadius: 10,
                   offset: const Offset(0, -2),
                 ),
@@ -142,6 +229,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: _controller,
+                    enabled: !_isLoading,
                     decoration: InputDecoration(
                       hintText: 'Chia sẻ cảm xúc của bạn...',
                       hintStyle: TextStyle(color: Colors.grey[400]),
@@ -161,13 +249,13 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 const SizedBox(width: 8),
                 Container(
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF7EB5A6),
+                  decoration: BoxDecoration(
+                    color: _isLoading ? Colors.grey : const Color(0xFF7EB5A6),
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
                     icon: const Icon(Icons.send, color: Colors.white),
-                    onPressed: _sendMessage,
+                    onPressed: _isLoading ? null : _sendMessage,
                   ),
                 ),
               ],
