@@ -2,14 +2,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import httpx
+import os
 from typing import Optional
 
 # ============================================
 # KHỞI TẠO APP
 # ============================================
-app = FastAPI(title="MindFlow AI - Mental Health Assistant", version="1.0.0")
+app = FastAPI(title="MindFlow AI - Mental Health Assistant", version="2.0.0")
 
-# CORS để Flutter gọi được
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,10 +19,12 @@ app.add_middleware(
 )
 
 # ============================================
-# CẤU HÌNH OLLAMA
+# CẤU HÌNH GROQ API (MIỄN PHÍ)
 # ============================================
-OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL_NAME = "qwen2.5:7b"
+# ⚠️ QUAN TRỌNG: Thay "DÁN_KEY_CỦA_BẠN_VÀO_ĐÂY" bằng API Key bạn vừa lấy được
+GROQ_API_KEY ="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" 
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+MODEL_NAME = "qwen/qwen3.8-27b"  # Model mạnh, miễn phí, hỗ trợ tiếng Việt tốt
 
 # ============================================
 # SYSTEM PROMPT - "LINH HỒN" CỦA MINDFLOW
@@ -41,11 +43,10 @@ QUY TẮC AN TOÀN (BẮT BUỘC):
   → Gợi ý đường dây nóng: Tổng đài Quốc gia về Bảo vệ Trẻ em 111, hoặc Đường dây nóng Tâm lý 1800-1567.
   → KHÔNG cố gắng tự chẩn đoán hoặc thay thế bác sĩ.
 - Không đưa ra lời khuyên y tế thay thế chuyên gia.
-- Nếu không chắc chắn, hãy thành thật nói "Mình không chắc, nhưng mình ở đây để lắng nghe bạn."
 
 PHONG CÁCH:
 - Ngắn gọn, dễ đọc (không viết quá dài).
-- Dùng emoji nhẹ nhàng (, 🌿, ✨) để tạo cảm giác ấm áp.
+- Dùng emoji nhẹ nhàng (💚, 🌿, ✨) để tạo cảm giác ấm áp.
 - Đặt câu hỏi mở để khuyến khích người dùng chia sẻ thêm."""
 
 # ============================================
@@ -74,7 +75,7 @@ chat_histories: dict[str, list[dict]] = {}
 # ============================================
 @app.get("/")
 def root():
-    return {"message": "MindFlow AI đang hoạt động!", "version": "1.0.0"}
+    return {"message": "MindFlow AI đang hoạt động trên Cloud!", "version": "2.0.0"}
 
 @app.get("/health")
 def health_check():
@@ -82,42 +83,37 @@ def health_check():
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_with_mindflow(request: ChatRequest):
-    # 1. Chuẩn bị messages cho Ollama
+    # 1. Chuẩn bị messages cho Groq
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     
-    # Thêm lịch sử chat (giới hạn 10 tin nhắn gần nhất)
     if request.history:
         for msg in request.history[-10:]:
             messages.append({"role": msg.role, "content": msg.content})
     
-    # Thêm tin nhắn mới nhất
     messages.append({"role": "user", "content": request.message})
     
-    # 2. Gọi Ollama API
+    # 2. Gọi Groq API
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
-                OLLAMA_URL,
+                GROQ_URL,
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json"
+                },
                 json={
                     "model": MODEL_NAME,
                     "messages": messages,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.7,
-                        "top_p": 0.9,
-                    }
+                    "temperature": 0.7,
+                    "max_tokens": 2048,
                 }
             )
             response.raise_for_status()
             data = response.json()
+            ai_reply = data["choices"][0]["message"]["content"]
             
-            ai_reply = data["message"]["content"]
-            
-    except httpx.ConnectError:
-        raise HTTPException(
-            status_code=503,
-            detail="Không thể kết nối đến Ollama. Đảm bảo Ollama đang chạy!"
-        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"Lỗi API: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi AI: {str(e)}")
     
@@ -151,7 +147,6 @@ def clear_history(user_id: str):
 # ============================================
 def _detect_mood(text: str) -> str:
     text_lower = text.lower()
-    
     mood_keywords = {
         "stress": ["căng thẳng", "áp lực", "stress", "kiệt sức"],
         "buồn": ["buồn", "sad", "chán", "mất hứng", "trống rỗng"],
@@ -160,16 +155,11 @@ def _detect_mood(text: str) -> str:
         "cô đơn": ["cô đơn", "lonely", "một mình", "bị bỏ rơi"],
         "vui": ["vui", "happy", "hạnh phúc", "tuyệt", "good"],
     }
-    
     for mood, keywords in mood_keywords.items():
         if any(kw in text_lower for kw in keywords):
             return mood
-    
     return "neutral"
 
-# =======================================s=====
-# CHẠY SERVER
-# ============================================
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
