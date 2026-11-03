@@ -38,7 +38,7 @@ class MindFlowApiService {
   // iOS Simulator: http://localhost:8000
   // Điện thoại thật: http://192.168.1.XX:8000 (IP máy tính)
   // Web browser: http://localhost:8000
-  static const String baseUrl = 'http://localhost:8000';
+  static const String baseUrl = 'https://mindflow-3zph.onrender.com';
 
   static Future<String> sendMessage(
     String userId,
