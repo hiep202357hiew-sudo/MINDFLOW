@@ -24052,7 +24052,7 @@ a4d(a,b,c){return A.aCF(a,b,c)},
 aCF(a,b,c){var s=0,r=A.R(t.N),q,p=2,o=[],n,m,l,k,j,i,h,g
 var $async$a4d=A.S(function(d,e){if(d===1){o.push(e)
 s=p}for(;;)switch(s){case 0:p=4
-l=A.fL("http://localhost:8000/api/chat")
+l=A.fL("https://mindflow-3zph.onrender.com/api/chat")
 k=t.N
 j=A.ae(["Content-Type","application/json"],k,k)
 i=A.Z(c).i("a5<1,aM<x,x>>")
